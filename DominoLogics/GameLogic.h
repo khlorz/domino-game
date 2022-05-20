@@ -137,6 +137,7 @@ public:
 	bool RenderTileIndependently(const char* label, const ImVec2& sz, const ImVec2& position, ImGuiButtonFlags flags = 0) const;
 
 	constexpr bool operator == (const Domino2D& other) const;
+	constexpr bool operator == (const DominoTile& other) const;
 };
 
 
@@ -256,6 +257,7 @@ private:
 	void NormalCompute();
 	void HardCompute();
 	void GigaBrainCompute();
+	bool FirstTurnAIAttack();
 
 };
 
@@ -302,6 +304,8 @@ class DominoGameStructure : public GameBoardDominoes
 {
 private:
 	bool              GameInitialized;
+	bool              ChangeInPlayers;
+	bool              PlayerOneAlwaysFirst;
 	DominoLogs        GameLog;
 	DominoAI          AIPlayerLogic;
 	PlayerArr<8>      Players;
@@ -313,11 +317,12 @@ private:
 	uint16_t          FirstTurn;
 	uint16_t          LastTurn;
 	uint16_t          NumberOfPasses;
+	DominoTile        FirstTurnTileAttack;       // This should be the tile that can only be used by the first turn player
 
 public:
 	DominoGameStructure();
 	~DominoGameStructure() = default;
-
+	
 	bool            InitializeGame(const uint16_t& number_of_players, const uint16_t& ai_difficulty, const bool& change_player = false);
 	bool            CheckGameState();
 	void            SetNoClickedCard();
@@ -326,17 +331,21 @@ public:
 	Domino2D*       GetPlayerSelectedCard(uint16_t player_number);
 	PlayerDomino2D& GetPlayerData(uint16_t pnum);
 
-	bool     CurrentPlayerCanAttack();
-	void     PassCurrentTurn();
-	void     TurnAdvance();
-	void     ResetGameState();
-	bool     RenderPlayerDominoes();
-	void     AddBoardDominoes(Domino2D& D, int left_or_right);
-	bool     AIAttackFunc();
-	void     AddGameLogs(const Domino2D* d, uint16_t player_number, LogMove player_move);
-	void     RenderGameLogs();
-	void     RenderCurrentTurnLog();
-	uint16_t GetNumberOfPlayers() const;
+	bool       CurrentPlayerCanAttack();
+	bool       IsThereAChangeInPlayer();
+	void       PassCurrentTurn();
+	void       TurnAdvance();
+	void       ResetGameState();
+	bool       RenderPlayerDominoes();
+	void       AddBoardDominoes(Domino2D& D, int left_or_right);
+	bool       AIAttackFunc();
+	void       AddGameLogs(const Domino2D* d, uint16_t player_number, LogMove player_move);
+	void       RenderGameLogs();
+	void       RenderCurrentTurnLog();
+	void       SetPlayerOneAsFirstTurn(bool enable);
+	uint16_t   GetNumberOfPlayers() const;
+	uint16_t   GetNumberOfTurns() const;
+	DominoTile GetFirstTurnTile() const;
 
 private:
 	// For distributing cards to the players

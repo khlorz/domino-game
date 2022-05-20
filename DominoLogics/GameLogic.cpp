@@ -560,8 +560,14 @@ bool Domino2D::ConnectDominoOnRight(Domino2D& DominoConnectee)
             TileOrientation = TileOrientation_Vertical;
         }
         else {
-            TilePos.x = DominoConnectee.TilePos.x + TileHeight;
-            TilePos.y = DominoConnectee.TilePos.y + (TileWidth / 2.0f) - (TileHeight / 2.0f);
+            if (dvars::GameState.LeftSideSize() > 8) {
+                TilePos.x = DominoConnectee.TilePos.x - TileWidth;
+                TilePos.y = DominoConnectee.TilePos.y + (TileWidth / 2.0f) - (TileHeight / 2.0f);
+            }
+            else {
+                TilePos.x = DominoConnectee.TilePos.x + TileHeight;
+                TilePos.y = DominoConnectee.TilePos.y + (TileWidth / 2.0f) - (TileHeight / 2.0f);
+            }
             TileOrientation = TileOrientation_Horizontal;
         }
     }
@@ -661,10 +667,10 @@ bool Domino2D::PseudoConnectDomino(Domino2D& DominoConnectee) const
         return false;
     }
 
-    const uint16_t& RightNumber = this->GetRightNumber();
-    const uint16_t& LeftNumber  = this->GetLeftNumber();
     const bool& leftconnect = DominoConnectee.MirrorTile ? DominoConnectee.IsRightConnectable() : DominoConnectee.IsLeftConnectable();
     const bool& rightconnect = DominoConnectee.MirrorTile ? DominoConnectee.IsLeftConnectable() : DominoConnectee.IsRightConnectable();
+    const uint16_t& RightNumber = this->GetRightNumber();
+    const uint16_t& LeftNumber  = this->GetLeftNumber();
     const uint16_t& ConnecteeLeftNumber  = DominoConnectee.MirrorTile ? DominoConnectee.GetRightNumber() : DominoConnectee.GetLeftNumber();
     const uint16_t& ConnecteeRightNumber = DominoConnectee.MirrorTile ? DominoConnectee.GetLeftNumber()  : DominoConnectee.GetRightNumber();
 
@@ -847,6 +853,12 @@ constexpr bool Domino2D::operator == (const Domino2D& DT) const
     return (left_number == DT.left_number && right_number == DT.right_number) || (right_number == DT.left_number && left_number == DT.right_number);
 }
 
+constexpr bool Domino2D::operator == (const DominoTile& other) const
+{
+    return (left_number == other.GetLeftNumber() && right_number == other.GetRightNumber()) || (right_number == other.GetLeftNumber() && left_number == other.GetRightNumber());
+}
+
+
 
 
 //-----------------------------------------------------------------------------------------------------------------------
@@ -937,20 +949,33 @@ void PlayerDomino2D::ClearDominoes()
 
 bool PlayerDomino2D::RenderPlayerDominoes()
 {
-    bool clicked = false;
+    bool clicked    = false;
+    auto& dgs       = dvars::GameState;
     ImVec2 position = TilePositioning;
+    bool first_tile_state = dgs.IsThereAChangeInPlayer() && dgs.GetNumberOfTurns() == 0;
 
     for (size_t iter = 0; auto DT : PlayerCards) {
         if (!DT->IsRemoved()) {
             static const char* Label[] = { "PDB##1", "PDB##2", "PDB##3", "PDB##4", "PDB##5" };
+
             ImGui::SameLine();
+            ImGui::BeginDisabled(first_tile_state && dgs.GetFirstTurnTile() != *DT); // Disable the tile in the first turn if it's not the first tile that needs to be used
             ImGui::PushStyleColor(ImGuiCol_Button, *TileColor);
             if (PlayerDominoButton(*DT, Label[iter], position)) {
-                CurrentlyClickedCard = CurrentlyClickedCard == nullptr ? DT : (CurrentlyClickedCard == DT ? nullptr : DT);
                 clicked = true;
+                CurrentlyClickedCard = CurrentlyClickedCard == nullptr ? DT : (CurrentlyClickedCard == DT ? nullptr : DT);
+            }
+            if (ImGui::IsItemHovered() && first_tile_state && dgs.GetFirstTurnTile() == *DT) {
+                ImGui::BeginTooltip();
+                ImGui::PushTextWrapPos(150.0f);
+                ImGui::TextUnformatted("FIRST TURN TILE USE");
+                ImGui::PopTextWrapPos();
+                ImGui::EndTooltip();
             }
             ImGui::PopStyleColor();
+            ImGui::EndDisabled();
         }
+
         position = ImVec2(position.x + 152.0f, position.y);
         iter++;
     }
@@ -1092,6 +1117,10 @@ void DominoAI::SetDifficulty(uint16_t ai_difficulty)
 
 void DominoAI::AIAttack()
 {
+    if (this->FirstTurnAIAttack()) {
+        return;
+    }
+
     switch (this->AIDifficulty)
     {
     case AIDifficulty_Random:    this->RandomCompute();    return;
@@ -1100,6 +1129,27 @@ void DominoAI::AIAttack()
     case AIDifficulty_GigaBrain: this->GigaBrainCompute(); return;
     default: return;
     }
+}
+
+bool DominoAI::FirstTurnAIAttack()
+{
+    if (!dvars::GameState.IsThereAChangeInPlayer() || dvars::GameState.GetNumberOfTurns() != 0) {
+        return false;
+    }
+
+    auto& dgs = dvars::GameState;
+    auto& ai_cards = this->AIData->GetPlayerCards();
+    for (auto& ai_card : ai_cards) {
+        if (*ai_card != dgs.GetFirstTurnTile()) {
+            continue;
+        }
+
+        ai_card->SetAsFirstDomino();
+        dgs.AddBoardDominoes(*ai_card, TileDropPosition_Left);
+        break;
+    }
+
+    return true;
 }
 
 void DominoAI::RandomCompute()
@@ -1114,21 +1164,21 @@ void DominoAI::RandomCompute()
         if (ai_card->IsRemoved()) {
             continue;
         }
-        if (dvars::GameState.NoDominoesYet()) {
+        if (dgs.NoDominoesYet()) {
             ai_card->SetAsFirstDomino();
-            dvars::GameState.AddBoardDominoes(*ai_card, TileDropPosition_Left);
+            dgs.AddBoardDominoes(*ai_card, TileDropPosition_Left);
+            return;
+        }
+        if (ai_card->ConnectDomino(dgs.EmptyRightSideDominoes() ? *dgs.GetFirstDomino() : *dgs.GetLatestRightSideDomino(), TileDropPosition_Right)) {
+            dgs.AddBoardDominoes(*ai_card, TileDropPosition_Right);
             return;
         }
         // Will use the first usable card and will attack on the left side
         if (ai_card->ConnectDomino(dgs.EmptyLeftSideDominoes() ? *dgs.GetFirstDomino() : *dgs.GetLatestLeftSideDomino(), TileDropPosition_Left)) {
-            dvars::GameState.AddBoardDominoes(*ai_card, TileDropPosition_Left);
+            dgs.AddBoardDominoes(*ai_card, TileDropPosition_Left);
             return;
         }
         // And if not possible, then on the right
-        if (ai_card->ConnectDomino(dgs.EmptyRightSideDominoes() ? *dgs.GetFirstDomino() : *dgs.GetLatestRightSideDomino(), TileDropPosition_Right)) {
-            dvars::GameState.AddBoardDominoes(*ai_card, TileDropPosition_Right);
-            return;
-        }
         // Otherwise, continue with loop and repeat
     }
 }
@@ -1168,13 +1218,20 @@ void DominoLogs::RenderLog(int NumberOfTurn)
 {
     if (NumberOfTurn == -1) {
         // Render all logs
-        /*for (size_t i = 0; auto & logs : LogData) {
-            logs.PlayerMove == LogMove_TurnAttack ? ImGui::Text("Turn %d: Player %d attacked with:") : ImGui::Text("Turn %d: Player %d passed for the turn");
+        static const auto domino_sz = ImVec2(121.0f, 60.0f);
+        std::string DominoLabels = "DT##0";
+
+        for (size_t i = 0; auto & logs : LogData) {
+            logs.PlayerMove == LogMove_TurnAttack ? ImGui::Text("Turn %d: Player %d attacked with:", i, logs.PlayerNumber) : ImGui::Text("Turn %d: Player %d passed", i, logs.PlayerNumber);
             if (logs.DominoUsed != nullptr) {
-                logs.DominoUsed->RenderTileIndependently("")
+                const auto& domino_pos = ImGui::GetCurrentWindow()->DC.CursorPos;
+                logs.DominoUsed->RenderTileIndependently(DominoLabels.c_str(), domino_sz, domino_pos);
             }
+
+            i++;
+            ImGui::Separator();
         }
-        return;*/
+        return;
     }
 
     ImGui::BeginGroup(); {
@@ -1232,30 +1289,40 @@ DominoGameStructure::DominoGameStructure() :
 
 bool DominoGameStructure::InitializeGame(const uint16_t & number_of_players, const uint16_t& ai_difficulty, const bool& change_player)
 {
+    // Check if the number of players is eligible for the game
     if (number_of_players < 4 || number_of_players > 8) {
         GameInitialized = false;
         return false;
     }
 
+    // Set the AI difficulty
     this->AIPlayerLogic.SetDifficulty(ai_difficulty);
 
     // In domino, whenever there is a change in player (a player leaves, a player joins, a player leaves but another joins at the same time), the first player will change
-    bool change_in_players = NumberOfPlayers != number_of_players || change_player;
-
+    ChangeInPlayers = NumberOfPlayers != number_of_players || change_player;
     NumberOfPlayers = number_of_players;
-    NumberOfCards = number_of_players == 4 ? 5 : (number_of_players > 6 ? 3 : 4);
+    NumberOfCards   = number_of_players == 4 ? 5 : (number_of_players > 6 ? 3 : 4);
 
-    DistributeCards();
+    this->DistributeCards();
 
-    if (change_in_players) {
-        FindFirstPlayerTurn();
+    if (PlayerOneAlwaysFirst) {
+        CurrentTurn = 0;
+        ChangeInPlayers = false;
     }
     else {
-        CurrentTurn = PlayerWinner;
+        if (ChangeInPlayers) 
+            this->FindFirstPlayerTurn();
+        else                 
+            CurrentTurn = PlayerWinner;
     }
 
     GameInitialized = true;
     return true;
+}
+
+void DominoGameStructure::SetPlayerOneAsFirstTurn(bool enable)
+{
+    this->PlayerOneAlwaysFirst = enable;
 }
 
 bool DominoGameStructure::CheckGameState()
@@ -1272,6 +1339,16 @@ bool DominoGameStructure::CheckGameState()
     }
 
     return false;
+}
+
+bool DominoGameStructure::IsThereAChangeInPlayer()
+{
+    return ChangeInPlayers;
+}
+
+DominoTile DominoGameStructure::GetFirstTurnTile() const
+{
+    return FirstTurnTileAttack;
 }
 
 void DominoGameStructure::PassCurrentTurn()
@@ -1322,6 +1399,7 @@ void DominoGameStructure::FindFirstPlayerTurn()
         for (int p = 0; p < NumberOfPlayers; p++) {
             if (Players[p].HasTheDouble(i)) {
                 CurrentTurn = FirstTurn = p;
+                FirstTurnTileAttack = DominoTile(i, i);
                 return;
             }
         }
@@ -1333,6 +1411,7 @@ void DominoGameStructure::FindFirstPlayerTurn()
             for (int p = 0; p < NumberOfPlayers; p++) {
                 if (Players[p].HasTheHighestCard(i, j)) {
                     CurrentTurn = FirstTurn = p;
+                    FirstTurnTileAttack = DominoTile(i, j);
                     return;
                 }
             }
@@ -1485,6 +1564,11 @@ void DominoGameStructure::RenderCurrentTurnLog()
     }
 
     GameLog.RenderLog(NumberOfTurns - 1);
+}
+
+uint16_t DominoGameStructure::GetNumberOfTurns() const
+{
+    return NumberOfTurns;
 }
 
 
