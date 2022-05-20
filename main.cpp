@@ -2,13 +2,6 @@
 #include "MainWindow.h"
 #include "ImGuiFunctions.h"
 
-
-//void* operator new(size_t size)
-//{
-//	std::cout << "Allocating " << size << " bytes\n";
-//	return malloc(size);
-//}
-
 int main()
 {
     // Initialize GLFW
@@ -60,5 +53,5 @@ int main()
     TheUI.Shutdown();
     TheWindow.Shutdown();
 
-	return 0;
+    return 0;
 }
